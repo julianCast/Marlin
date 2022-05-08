@@ -40,6 +40,7 @@ M500 ;Reset settings in EEPROM
 ```
 
 2. Calibrate BLTouch Probe z-offset
+:tv: [Watch Video with instructions](https://www.youtube.com/watch?v=y_1Kg45APko)
 ```gcode
 G28         ;home
 M851 Z0     ;reset current z offset
@@ -58,5 +59,15 @@ M500, M501, M503
 G28
 G1 F60 Z0   ;check is correct
 ```
-:tv: [Watch Video with instructions](https://www.youtube.com/watch?v=y_1Kg45APko)
+
+
+
+
+3. Calibrate Sensorless sensitivity
+<a href="https://ibb.co/4TxN6Ng"><img height="200" src="https://i.ibb.co/NjzY8Yn/Screenshot-2022-05-08-at-17-27-28.png" alt="Screenshot-2022-05-08-at-17-27-28" border="0"></a>
+
+:tv: [Watch video with instructions](https://www.youtube.com/watch?v=0PEGNj5m90o)
+The values run 0-256 (The lower the less sensitivity)
+Start from 128 and, if it goes fine, lower the value until it's safe.  
+
 
