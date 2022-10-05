@@ -67,18 +67,21 @@ void GcodeSuite::M420() {
       const float x_min = probe.min_x(), x_max = probe.max_x(),
                   y_min = probe.min_y(), y_max = probe.max_y();
       #if ENABLED(AUTO_BED_LEVELING_BILINEAR)
-        bilinear_start.set(x_min, y_min);
-        bilinear_grid_spacing.set((x_max - x_min) / (GRID_MAX_POINTS_X - 1),
-                                  (y_max - y_min) / (GRID_MAX_POINTS_Y - 1));
+        xy_pos_t start, spacing;
+        start.set(x_min, y_min);
+        spacing.set((x_max - x_min) / (GRID_MAX_CELLS_X),
+                    (y_max - y_min) / (GRID_MAX_CELLS_Y));
+        bbl.set_grid(spacing, start);
       #endif
       GRID_LOOP(x, y) {
         Z_VALUES(x, y) = 0.001 * random(-200, 200);
         TERN_(EXTENSIBLE_UI, ExtUI::onMeshUpdate(x, y, Z_VALUES(x, y)));
       }
+      TERN_(AUTO_BED_LEVELING_BILINEAR, bbl.refresh_bed_level());
       SERIAL_ECHOPGM("Simulated " STRINGIFY(GRID_MAX_POINTS_X) "x" STRINGIFY(GRID_MAX_POINTS_Y) " mesh ");
-      SERIAL_ECHOPAIR(" (", x_min);
+      SERIAL_ECHOPGM(" (", x_min);
       SERIAL_CHAR(','); SERIAL_ECHO(y_min);
-      SERIAL_ECHOPAIR(")-(", x_max);
+      SERIAL_ECHOPGM(")-(", x_max);
       SERIAL_CHAR(','); SERIAL_ECHO(y_max);
       SERIAL_ECHOLNPGM(")");
     }
@@ -108,7 +111,7 @@ void GcodeSuite::M420() {
 
         if (!WITHIN(storage_slot, 0, a - 1)) {
           SERIAL_ECHOLNPGM("?Invalid storage slot.");
-          SERIAL_ECHOLNPAIR("?Use 0 to ", a - 1);
+          SERIAL_ECHOLNPGM("?Use 0 to ", a - 1);
           return;
         }
 
@@ -128,12 +131,12 @@ void GcodeSuite::M420() {
       ubl.display_map(parser.byteval('T'));
       SERIAL_ECHOPGM("Mesh is ");
       if (!ubl.mesh_is_valid()) SERIAL_ECHOPGM("in");
-      SERIAL_ECHOLNPAIR("valid\nStorage slot: ", ubl.storage_slot);
+      SERIAL_ECHOLNPGM("valid\nStorage slot: ", ubl.storage_slot);
     }
 
   #endif // AUTO_BED_LEVELING_UBL
 
-  const bool seenV = parser.seen('V');
+  const bool seenV = parser.seen_test('V');
 
   #if HAS_MESH
 
@@ -156,16 +159,16 @@ void GcodeSuite::M420() {
             GRID_LOOP(x, y) mesh_sum += Z_VALUES(x, y);
             const float zmean = mesh_sum / float(GRID_MAX_POINTS);
 
-          #else
+          #else // midrange
 
-            // Find the low and high mesh values
+            // Find the low and high mesh values.
             float lo_val = 100, hi_val = -100;
             GRID_LOOP(x, y) {
               const float z = Z_VALUES(x, y);
               NOMORE(lo_val, z);
               NOLESS(hi_val, z);
             }
-            // Take the mean of the lowest and highest
+            // Get the midrange plus C value. (The median may be better.)
             const float zmean = (lo_val + hi_val) / 2.0 + cval;
 
           #endif
@@ -178,7 +181,7 @@ void GcodeSuite::M420() {
               Z_VALUES(x, y) -= zmean;
               TERN_(EXTENSIBLE_UI, ExtUI::onMeshUpdate(x, y, Z_VALUES(x, y)));
             }
-            TERN_(ABL_BILINEAR_SUBDIVISION, bed_level_virt_interpolate());
+            TERN_(AUTO_BED_LEVELING_BILINEAR, bbl.refresh_bed_level());
           }
 
         #endif
@@ -195,12 +198,11 @@ void GcodeSuite::M420() {
   // V to print the matrix or mesh
   if (seenV) {
     #if ABL_PLANAR
-      planner.bed_level_matrix.debug(PSTR("Bed Level Correction Matrix:"));
+      planner.bed_level_matrix.debug(F("Bed Level Correction Matrix:"));
     #else
       if (leveling_is_valid()) {
         #if ENABLED(AUTO_BED_LEVELING_BILINEAR)
-          print_bilinear_leveling_grid();
-          TERN_(ABL_BILINEAR_SUBDIVISION, print_bilinear_leveling_grid_virt());
+          bbl.print_leveling_grid();
         #elif ENABLED(MESH_BED_LEVELING)
           SERIAL_ECHOLNPGM("Mesh Bed Level data:");
           mbl.report_mesh();
@@ -240,6 +242,20 @@ void GcodeSuite::M420() {
   // Report change in position
   if (oldpos != current_position)
     report_current_position();
+}
+
+void GcodeSuite::M420_report(const bool forReplay/*=true*/) {
+  report_heading_etc(forReplay, F(
+    TERN(MESH_BED_LEVELING, "Mesh Bed Leveling", TERN(AUTO_BED_LEVELING_UBL, "Unified Bed Leveling", "Auto Bed Leveling"))
+  ));
+  SERIAL_ECHOF(
+    F("  M420 S"), planner.leveling_active
+    #if ENABLED(ENABLE_LEVELING_FADE_HEIGHT)
+      , FPSTR(SP_Z_STR), LINEAR_UNIT(planner.z_fade_height)
+    #endif
+    , F(" ; Leveling ")
+  );
+  serialprintln_onoff(planner.leveling_active);
 }
 
 #endif // HAS_LEVELING

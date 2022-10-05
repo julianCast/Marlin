@@ -48,7 +48,7 @@
 
 bool leveling_is_valid() {
   return TERN1(MESH_BED_LEVELING,          mbl.has_mesh())
-      && TERN1(AUTO_BED_LEVELING_BILINEAR, !!bilinear_grid_spacing.x)
+      && TERN1(AUTO_BED_LEVELING_BILINEAR, bbl.has_mesh())
       && TERN1(AUTO_BED_LEVELING_UBL,      ubl.mesh_is_valid());
 }
 
@@ -66,12 +66,6 @@ void set_bed_leveling_enabled(const bool enable/*=true*/) {
   if (can_change && enable != planner.leveling_active) {
 
     planner.synchronize();
-
-    #if ENABLED(AUTO_BED_LEVELING_BILINEAR)
-      // Force bilinear_z_offset to re-calculate next time
-      const xyz_pos_t reset { -9999.999, -9999.999, 0 };
-      (void)bilinear_z_offset(reset);
-    #endif
 
     if (planner.leveling_active) {      // leveling from on to off
       if (DEBUGGING(LEVELING)) DEBUG_POS("Leveling ON", current_position);
@@ -98,7 +92,7 @@ TemporaryBedLevelingState::TemporaryBedLevelingState(const bool enable) : saved(
 
 #if ENABLED(ENABLE_LEVELING_FADE_HEIGHT)
 
-  void set_z_fade_height(const float &zfh, const bool do_report/*=true*/) {
+  void set_z_fade_height(const_float_t zfh, const bool do_report/*=true*/) {
 
     if (planner.z_fade_height == zfh) return;
 
@@ -129,12 +123,7 @@ void reset_bed_level() {
     #if ENABLED(MESH_BED_LEVELING)
       mbl.reset();
     #elif ENABLED(AUTO_BED_LEVELING_BILINEAR)
-      bilinear_start.reset();
-      bilinear_grid_spacing.reset();
-      GRID_LOOP(x, y) {
-        z_values[x][y] = NAN;
-        TERN_(EXTENSIBLE_UI, ExtUI::onMeshUpdate(x, y, 0));
-      }
+      bbl.reset();
     #elif ABL_PLANAR
       planner.bed_level_matrix.set_to_identity();
     #endif
@@ -156,7 +145,7 @@ void reset_bed_level() {
   /**
    * Print calibration results for plotting or manual frame adjustment.
    */
-  void print_2d_array(const uint8_t sx, const uint8_t sy, const uint8_t precision, element_2d_fn fn) {
+  void print_2d_array(const uint8_t sx, const uint8_t sy, const uint8_t precision, const float *values) {
     #ifndef SCAD_MESH_OUTPUT
       LOOP_L_N(x, sx) {
         serial_spaces(precision + (x < 10 ? 3 : 2));
@@ -176,7 +165,7 @@ void reset_bed_level() {
       #endif
       LOOP_L_N(x, sx) {
         SERIAL_CHAR(' ');
-        const float offset = fn(x, y);
+        const float offset = values[x * sx + y];
         if (!isnan(offset)) {
           if (offset >= 0) SERIAL_CHAR('+');
           SERIAL_ECHO_F(offset, int(precision));
@@ -213,27 +202,27 @@ void reset_bed_level() {
 
   void _manual_goto_xy(const xy_pos_t &pos) {
 
+    // Get the resting Z position for after the XY move
     #ifdef MANUAL_PROBE_START_Z
-      constexpr float startz = _MAX(0, MANUAL_PROBE_START_Z);
-      #if MANUAL_PROBE_HEIGHT > 0
-        do_blocking_move_to_xy_z(pos, MANUAL_PROBE_HEIGHT);
-        do_blocking_move_to_z(startz);
-      #else
-        do_blocking_move_to_xy_z(pos, startz);
-      #endif
-    #elif MANUAL_PROBE_HEIGHT > 0
-      const float prev_z = current_position.z;
-      do_blocking_move_to_xy_z(pos, MANUAL_PROBE_HEIGHT);
-      do_blocking_move_to_z(prev_z);
+      constexpr float finalz = _MAX(0, MANUAL_PROBE_START_Z); // If a MANUAL_PROBE_START_Z value is set, always respect it
     #else
-      do_blocking_move_to_xy(pos);
+      #warning "It's recommended to set some MANUAL_PROBE_START_Z value for manual leveling."
     #endif
-
-    current_position = pos;
+    #if Z_CLEARANCE_BETWEEN_MANUAL_PROBES > 0     // A probe/obstacle clearance exists so there is a raise:
+      #ifndef MANUAL_PROBE_START_Z
+        const float finalz = current_position.z;  // - Use the current Z for starting-Z if no MANUAL_PROBE_START_Z was provided
+      #endif
+      do_blocking_move_to_xy_z(pos, Z_CLEARANCE_BETWEEN_MANUAL_PROBES); // - Raise Z, then move to the new XY
+      do_blocking_move_to_z(finalz);              // - Lower down to the starting Z height, ready for adjustment!
+    #elif defined(MANUAL_PROBE_START_Z)           // A starting-Z was provided, but there's no raise:
+      do_blocking_move_to_xy_z(pos, finalz);      // - Move in XY then down to the starting Z height, ready for adjustment!
+    #else                                         // Zero raise and no starting Z height either:
+      do_blocking_move_to_xy(pos);                // - Move over with no raise, ready for adjustment!
+    #endif
 
     TERN_(LCD_BED_LEVELING, ui.wait_for_move = false);
   }
 
-#endif
+#endif // MESH_BED_LEVELING || PROBE_MANUALLY
 
 #endif // HAS_LEVELING

@@ -68,4 +68,3 @@ G1 F60 Z0   ;check is correct
 The values run 0-256 (The lower the less sensitivity)
 Start from 128 and, if it goes fine, lower the value until it's safe.  
 
-
